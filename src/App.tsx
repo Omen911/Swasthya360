@@ -417,8 +417,11 @@ const HealthTipBar = () => {
         setTip(data);
       }
     } catch (e: any) {
-      console.error("Error fetching tip:", e);
-      if (e?.status === 429 || e?.message?.includes('429') || e?.message?.includes('quota')) {
+      const isQuotaError = e?.status === 429 || e?.message?.includes('429') || e?.message?.includes('quota') || e?.message?.includes('RESOURCE_EXHAUSTED');
+      if (!isQuotaError) {
+        console.error("Error fetching tip:", e);
+      }
+      if (isQuotaError) {
         setTip({ hindi: "विश्रामः आवश्यकः।", english: "API quota exceeded. Please try again later." });
       } else if (!tip) {
         setTip({ hindi: "स्वस्थं कुरु।", english: "Stay healthy and mindful." });
@@ -924,8 +927,11 @@ function SymptomFinder({ profile, favorites }: { profile: UserProfile | null, fa
         throw new Error("Empty response from AI");
       }
     } catch (e: any) {
-      console.error("Remedy Finder Error:", e);
-      if (e?.status === 429 || e?.message?.includes('429') || e?.message?.includes('quota')) {
+      const isQuotaError = e?.status === 429 || e?.message?.includes('429') || e?.message?.includes('quota') || e?.message?.includes('RESOURCE_EXHAUSTED');
+      if (!isQuotaError) {
+        console.error("Remedy Finder Error:", e);
+      }
+      if (isQuotaError) {
         setResults([{
           name: "API Quota Exceeded",
           benefits: "Please try again later.",
@@ -1187,8 +1193,11 @@ function HerbScanner() {
       });
       setResult(JSON.parse(response.text));
     } catch (e: any) {
-      console.error(e);
-      if (e?.status === 429 || e?.message?.includes('429') || e?.message?.includes('quota')) {
+      const isQuotaError = e?.status === 429 || e?.message?.includes('429') || e?.message?.includes('quota') || e?.message?.includes('RESOURCE_EXHAUSTED');
+      if (!isQuotaError) {
+        console.error(e);
+      }
+      if (isQuotaError) {
         setResult({
           name: "API Quota Exceeded",
           scientificName: "N/A",
@@ -1601,7 +1610,8 @@ function CalorieTracker({ profile, logs }: { profile: UserProfile | null, logs: 
       });
       setFoodInput('');
     } catch (e: any) {
-      if (e?.status === 429 || e?.message?.includes('429') || e?.message?.includes('quota')) {
+      const isQuotaError = e?.status === 429 || e?.message?.includes('429') || e?.message?.includes('quota') || e?.message?.includes('RESOURCE_EXHAUSTED');
+      if (isQuotaError) {
         alert("API Quota Exceeded. Cannot estimate calories right now. Please try again later.");
       } else {
         handleFirestoreError(e, OperationType.WRITE, `users/${auth.currentUser.uid}/logs/${today}`);
@@ -1835,9 +1845,11 @@ function Chatbot({ profile }: { profile: UserProfile | null }) {
       const response = await chat.sendMessage({ message: userMsg });
       setMessages(prev => [...prev, { role: 'model', text: response.text }]);
     } catch (e: any) {
-      if (e?.status === 429 || e?.message?.includes('429') || e?.message?.includes('quota')) {
+      const isQuotaError = e?.status === 429 || e?.message?.includes('429') || e?.message?.includes('quota') || e?.message?.includes('RESOURCE_EXHAUSTED');
+      if (isQuotaError) {
         setMessages(prev => [...prev, { role: 'model', text: "I apologize, but I have reached my daily limit for answering questions (API Quota Exceeded). Please try again later." }]);
       } else {
+        console.error(e);
         setMessages(prev => [...prev, { role: 'model', text: "I apologize, I am having trouble connecting to my ancient wisdom. Please try again." }]);
       }
     } finally {
@@ -1936,8 +1948,11 @@ function DIYRemedyMaker() {
       });
       setRemedy(JSON.parse(response.text));
     } catch (e: any) {
-      console.error(e);
-      if (e?.status === 429 || e?.message?.includes('429') || e?.message?.includes('quota')) {
+      const isQuotaError = e?.status === 429 || e?.message?.includes('429') || e?.message?.includes('quota') || e?.message?.includes('RESOURCE_EXHAUSTED');
+      if (!isQuotaError) {
+        console.error(e);
+      }
+      if (isQuotaError) {
         setRemedy({
           name: "API Quota Exceeded",
           benefits: "Please try again later.",
