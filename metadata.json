@@ -1,0 +1,5 @@
+{
+  "name": "Swasthya 360",
+  "description": "A comprehensive Ayurvedic health platform combining Indian Knowledge Systems with modern AI for holistic well-being.",
+  "requestFramePermissions": ["camera", "microphone", "geolocation"]
+}
