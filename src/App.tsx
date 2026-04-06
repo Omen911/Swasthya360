@@ -26,9 +26,11 @@ import {
   LayoutDashboard
 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
-import { auth, db, signIn, logOut, OperationType, handleFirestoreError } from './firebase';
-import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { doc, onSnapshot, setDoc, collection, addDoc, query, orderBy, limit } from 'firebase/firestore';
+import { 
+  auth, db, signIn, signInRedirect, logOut, OperationType, handleFirestoreError,
+  onAuthStateChanged, getRedirectResult, User as FirebaseUser,
+  doc, onSnapshot, setDoc, collection, addDoc, query, orderBy, limit
+} from './firebase';
 import ReactMarkdown from 'react-markdown';
 import { cn } from './lib/utils';
 import { UserProfile, Favorite, HealthLog, Herb } from './types';
@@ -414,8 +416,11 @@ const HealthTipBar = () => {
       if (data.english !== tip?.english) {
         setTip(data);
       }
-    } catch (e) {
-      if (!tip) {
+    } catch (e: any) {
+      console.error("Error fetching tip:", e);
+      if (e?.status === 429 || e?.message?.includes('429') || e?.message?.includes('quota')) {
+        setTip({ hindi: "विश्रामः आवश्यकः।", english: "API quota exceeded. Please try again later." });
+      } else if (!tip) {
         setTip({ hindi: "स्वस्थं कुरु।", english: "Stay healthy and mindful." });
       }
     } finally {
@@ -430,7 +435,7 @@ const HealthTipBar = () => {
       if (!document.hidden) {
         fetchTip();
       }
-    }, 11000);
+    }, 3600000); // Fetch every 1 hour instead of every 11 seconds
     return () => clearInterval(interval);
   }, [tip?.english]); // Re-bind if tip changes to ensure closure has latest state if needed
 
@@ -480,14 +485,60 @@ export default function App() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isSigningIn, setIsSigningIn] = useState(false);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [healthLogs, setHealthLogs] = useState<HealthLog[]>([]);
+
+  const handleSignIn = async () => {
+    setAuthError(null);
+    setIsSigningIn(true);
+    try {
+      await signIn();
+    } catch (error: any) {
+      console.error("Authentication error:", error);
+      if (error.code === 'auth/popup-closed-by-user') {
+        setAuthError("Sign-in popup was closed or blocked. If you are in a preview window, browsers often block popups. Please click 'Open in New Tab' (top right) or allow popups to sign in.");
+      } else if (error.code === 'auth/unauthorized-domain') {
+        setAuthError("This domain is not authorized for Firebase Authentication. Please add it in the Firebase Console.");
+      } else if (error.code === 'auth/network-request-failed') {
+        setAuthError("Network error. Please check your connection and try again.");
+      } else {
+        setAuthError(error.message || "An error occurred during sign-in.");
+      }
+    } finally {
+      setIsSigningIn(false);
+    }
+  };
+
+  const handleSignInRedirect = async () => {
+    setAuthError(null);
+    setIsSigningIn(true);
+    try {
+      await signInRedirect();
+    } catch (error: any) {
+      console.error("Redirect auth error:", error);
+      setAuthError(error.message || "An error occurred during redirect sign-in.");
+      setIsSigningIn(false);
+    }
+  };
 
   // Auth Listener
   useEffect(() => {
     if (isApiKeyMissing) {
       console.warn("Gemini API Key is missing. Some features may not work.");
     }
+    
+    // Check for redirect result
+    getRedirectResult(auth).catch((error) => {
+      console.error("Redirect result error:", error);
+      if (error.code === 'auth/unauthorized-domain') {
+        setAuthError("This domain is not authorized for Firebase Authentication. Please add it in the Firebase Console.");
+      } else {
+        setAuthError(error.message || "An error occurred after redirect.");
+      }
+    });
+
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setIsAuthReady(true);
@@ -565,13 +616,39 @@ export default function App() {
           <Leaf className="w-16 h-16 text-emerald-600 mx-auto mb-4" />
           <h1 className="text-3xl font-bold text-emerald-900 mb-2">Swasthya 360</h1>
           <p className="text-emerald-700 mb-8">Your Holistic Ayurvedic Companion for Modern Life.</p>
-          <button
-            onClick={signIn}
-            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-md flex items-center justify-center gap-2"
-          >
-            <User className="w-5 h-5" />
-            Sign in with Google
-          </button>
+          
+          {authError && (
+            <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-6 rounded-r-xl text-left">
+              <div className="flex items-center gap-2 mb-1">
+                <AlertTriangle className="text-red-500 w-5 h-5 shrink-0" />
+                <p className="text-red-800 font-bold text-sm">Authentication Error</p>
+              </div>
+              <p className="text-red-700 text-xs">{authError}</p>
+            </div>
+          )}
+
+          <div className="space-y-3">
+            <button
+              onClick={handleSignIn}
+              disabled={isSigningIn}
+              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-70"
+            >
+              {isSigningIn ? (
+                <RefreshCw className="w-5 h-5 animate-spin" />
+              ) : (
+                <User className="w-5 h-5" />
+              )}
+              {isSigningIn ? "Signing in..." : "Sign in with Google (Popup)"}
+            </button>
+            
+            <button
+              onClick={handleSignInRedirect}
+              disabled={isSigningIn}
+              className="w-full bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold py-3 px-6 rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 disabled:opacity-70"
+            >
+              {isSigningIn ? "Redirecting..." : "Sign in with Redirect (Mobile/Preview)"}
+            </button>
+          </div>
           <p className="mt-6 text-xs text-emerald-500">
             By signing in, you agree to our terms and acknowledge that this app is for educational purposes only.
           </p>
@@ -846,15 +923,24 @@ function SymptomFinder({ profile, favorites }: { profile: UserProfile | null, fa
       } else {
         throw new Error("Empty response from AI");
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error("Remedy Finder Error:", e);
-      // Fallback to a generic message if AI fails
-      setResults([{
-        name: "Warm Water & Rest",
-        benefits: "Hydration and recovery",
-        howToUse: "Sip warm water throughout the day.",
-        precautions: "None"
-      }]);
+      if (e?.status === 429 || e?.message?.includes('429') || e?.message?.includes('quota')) {
+        setResults([{
+          name: "API Quota Exceeded",
+          benefits: "Please try again later.",
+          howToUse: "The AI service has reached its limit for now.",
+          precautions: "Wait a while before trying again."
+        }]);
+      } else {
+        // Fallback to a generic message if AI fails
+        setResults([{
+          name: "Warm Water & Rest",
+          benefits: "Hydration and recovery",
+          howToUse: "Sip warm water throughout the day.",
+          precautions: "None"
+        }]);
+      }
       setSeverity('Mild');
     } finally {
       setLoading(false);
@@ -1100,8 +1186,31 @@ function HerbScanner() {
         config: { responseMimeType: "application/json" }
       });
       setResult(JSON.parse(response.text));
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      if (e?.status === 429 || e?.message?.includes('429') || e?.message?.includes('quota')) {
+        setResult({
+          name: "API Quota Exceeded",
+          scientificName: "N/A",
+          confidence: 0,
+          history: "The AI service has reached its limit for now.",
+          benefits: "Please try again later.",
+          precautions: "Wait a while before trying again.",
+          wikiUrl: "",
+          others: []
+        });
+      } else {
+        setResult({
+          name: "Error identifying plant",
+          scientificName: "N/A",
+          confidence: 0,
+          history: "An error occurred during analysis.",
+          benefits: "N/A",
+          precautions: "N/A",
+          wikiUrl: "",
+          others: []
+        });
+      }
     } finally {
       setScanning(false);
     }
@@ -1491,8 +1600,12 @@ function CalorieTracker({ profile, logs }: { profile: UserProfile | null, logs: 
         updatedAt: new Date().toISOString()
       });
       setFoodInput('');
-    } catch (e) {
-      handleFirestoreError(e, OperationType.WRITE, `users/${auth.currentUser.uid}/logs/${today}`);
+    } catch (e: any) {
+      if (e?.status === 429 || e?.message?.includes('429') || e?.message?.includes('quota')) {
+        alert("API Quota Exceeded. Cannot estimate calories right now. Please try again later.");
+      } else {
+        handleFirestoreError(e, OperationType.WRITE, `users/${auth.currentUser.uid}/logs/${today}`);
+      }
     } finally {
       setLoading(false);
     }
@@ -1721,8 +1834,12 @@ function Chatbot({ profile }: { profile: UserProfile | null }) {
       });
       const response = await chat.sendMessage({ message: userMsg });
       setMessages(prev => [...prev, { role: 'model', text: response.text }]);
-    } catch (e) {
-      setMessages(prev => [...prev, { role: 'model', text: "I apologize, I am having trouble connecting to my ancient wisdom. Please try again." }]);
+    } catch (e: any) {
+      if (e?.status === 429 || e?.message?.includes('429') || e?.message?.includes('quota')) {
+        setMessages(prev => [...prev, { role: 'model', text: "I apologize, but I have reached my daily limit for answering questions (API Quota Exceeded). Please try again later." }]);
+      } else {
+        setMessages(prev => [...prev, { role: 'model', text: "I apologize, I am having trouble connecting to my ancient wisdom. Please try again." }]);
+      }
     } finally {
       setLoading(false);
     }
@@ -1818,8 +1935,16 @@ function DIYRemedyMaker() {
         config: { responseMimeType: "application/json" }
       });
       setRemedy(JSON.parse(response.text));
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      if (e?.status === 429 || e?.message?.includes('429') || e?.message?.includes('quota')) {
+        setRemedy({
+          name: "API Quota Exceeded",
+          benefits: "Please try again later.",
+          method: "The AI service has reached its limit for now.",
+          timing: "Wait a while before trying again."
+        });
+      }
     } finally {
       setLoading(false);
     }

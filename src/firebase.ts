@@ -1,28 +1,4 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, getDoc, setDoc, collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, getDocFromServer } from 'firebase/firestore';
-import firebaseConfig from '../firebase-applet-config.json';
-
-const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-export const googleProvider = new GoogleAuthProvider();
-
-export const signIn = () => signInWithPopup(auth, googleProvider);
-export const logOut = () => signOut(auth);
-
-// Test connection
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration.");
-    }
-  }
-}
-testConnection();
-
+// Local Mock Firebase implementation using localStorage
 export enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',
@@ -32,44 +8,165 @@ export enum OperationType {
   WRITE = 'write',
 }
 
-export interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId: string | undefined;
-    email: string | null | undefined;
-    emailVerified: boolean | undefined;
-    isAnonymous: boolean | undefined;
-    tenantId: string | null | undefined;
-    providerInfo: {
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }[];
-  }
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  console.error('Mock Firestore Error: ', error, operationType, path);
 }
 
-export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
-    },
-    operationType,
-    path
+export type User = {
+  uid: string;
+  displayName: string | null;
+  email: string | null;
+};
+
+// --- Mock Auth ---
+export const auth = {
+  currentUser: JSON.parse(localStorage.getItem('swasthya_user') || 'null') as User | null,
+};
+
+const authListeners: ((user: User | null) => void)[] = [];
+
+export const onAuthStateChanged = (authObj: any, callback: (user: User | null) => void) => {
+  authListeners.push(callback);
+  setTimeout(() => callback(auth.currentUser), 0);
+  return () => {
+    const idx = authListeners.indexOf(callback);
+    if (idx > -1) authListeners.splice(idx, 1);
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
+};
+
+export const signIn = async () => {
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      const user: User = { 
+        uid: 'local-user-' + Math.floor(Math.random() * 10000), 
+        displayName: 'Guest User', 
+        email: 'guest@example.com' 
+      };
+      localStorage.setItem('swasthya_user', JSON.stringify(user));
+      auth.currentUser = user;
+      authListeners.forEach(l => l(user));
+      resolve({ user });
+    }, 800);
+  });
+};
+
+export const signInRedirect = signIn;
+
+export const logOut = async () => {
+  localStorage.removeItem('swasthya_user');
+  auth.currentUser = null;
+  authListeners.forEach(l => l(null));
+};
+
+export const getRedirectResult = async (authObj?: any) => null;
+
+// --- Mock Firestore ---
+export const db = {};
+
+const getLocalData = () => JSON.parse(localStorage.getItem('swasthya_db') || '{}');
+const setLocalData = (data: any) => localStorage.setItem('swasthya_db', JSON.stringify(data));
+
+export const doc = (dbObj: any, ...path: string[]) => ({ path: path.join('/') });
+export const collection = (dbObj: any, ...path: string[]) => ({ path: path.join('/') });
+
+const snapshotListeners: Record<string, any[]> = {};
+
+const triggerSnapshot = (path: string) => {
+  // trigger exact doc matches
+  if (snapshotListeners[path]) {
+    const dbData = getLocalData();
+    const data = dbData[path];
+    snapshotListeners[path].forEach(cb => cb({
+      exists: () => !!data,
+      data: () => data,
+      id: path.split('/').pop()
+    }));
+  }
+  // trigger collection matches
+  const parentPath = path.split('/').slice(0, -1).join('/');
+  if (snapshotListeners[parentPath]) {
+    const dbData = getLocalData();
+    const docs = Object.keys(dbData)
+      .filter(k => k.startsWith(parentPath + '/') && k.split('/').length === parentPath.split('/').length + 1)
+      .map(k => ({ id: k.split('/').pop(), data: () => dbData[k] }));
+    
+    snapshotListeners[parentPath].forEach(cb => cb({
+      docs
+    }));
+  }
+};
+
+export const setDoc = async (docRef: any, data: any, options?: any) => {
+  const dbData = getLocalData();
+  if (options?.merge) {
+    dbData[docRef.path] = { ...(dbData[docRef.path] || {}), ...data };
+  } else {
+    dbData[docRef.path] = data;
+  }
+  setLocalData(dbData);
+  triggerSnapshot(docRef.path);
+};
+
+export const addDoc = async (collRef: any, data: any) => {
+  const id = Math.random().toString(36).substring(2, 9);
+  const path = `${collRef.path}/${id}`;
+  const dbData = getLocalData();
+  dbData[path] = data;
+  setLocalData(dbData);
+  triggerSnapshot(collRef.path);
+  return { id, path };
+};
+
+export const query = (collRef: any, ...args: any[]) => ({ ...collRef, queryArgs: args });
+export const orderBy = (field: string, dir: string) => ({ type: 'orderBy', field, dir });
+export const limit = (num: number) => ({ type: 'limit', num });
+
+export const onSnapshot = (ref: any, callback: any, onError?: any) => {
+  const path = ref.path;
+  if (!snapshotListeners[path]) snapshotListeners[path] = [];
+  snapshotListeners[path].push(callback);
+  
+  // Initial trigger
+  setTimeout(() => {
+    const dbData = getLocalData();
+    if (path.split('/').length % 2 === 0) {
+      // Document
+      const data = dbData[path];
+      callback({
+        exists: () => !!data,
+        data: () => data,
+        id: path.split('/').pop()
+      });
+    } else {
+      // Collection
+      let docs = Object.keys(dbData)
+        .filter(k => k.startsWith(path + '/') && k.split('/').length === path.split('/').length + 1)
+        .map(k => ({ id: k.split('/').pop(), data: () => dbData[k] }));
+      
+      // Handle simple orderBy (mock)
+      if (ref.queryArgs) {
+        const order = ref.queryArgs.find((a: any) => a.type === 'orderBy');
+        if (order) {
+          docs.sort((a, b) => {
+            const valA = a.data()[order.field];
+            const valB = b.data()[order.field];
+            if (valA < valB) return order.dir === 'asc' ? -1 : 1;
+            if (valA > valB) return order.dir === 'asc' ? 1 : -1;
+            return 0;
+          });
+        }
+        const lim = ref.queryArgs.find((a: any) => a.type === 'limit');
+        if (lim) {
+          docs = docs.slice(0, lim.num);
+        }
+      }
+
+      callback({ docs });
+    }
+  }, 0);
+
+  return () => {
+    const idx = snapshotListeners[path].indexOf(callback);
+    if (idx > -1) snapshotListeners[path].splice(idx, 1);
+  };
+};
