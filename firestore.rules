@@ -44,7 +44,8 @@ service cloud.firestore {
              (!('activityLevel' in data) || data.activityLevel in ['sedentary', 'light', 'moderate', 'active', 'very_active']) &&
              (!('dosha' in data) || data.dosha in ['Vata', 'Pitta', 'Kapha', 'Unknown']) &&
              (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100)) &&
-             (!('age' in data) || (data.age is number && data.age >= 0 && data.age < 150));
+             (!('age' in data) || (data.age is number && data.age >= 0 && data.age < 150)) &&
+             (!('calorieGoal' in data) || (data.calorieGoal is number && data.calorieGoal > 0 && data.calorieGoal < 10000));
     }
 
     function isValidFavorite(data) {

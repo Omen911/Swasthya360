@@ -44,7 +44,10 @@ import {
 
 // --- Constants & Types ---
 const AI_MODEL = "gemini-3-flash-preview";
-const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+const API_KEY = process.env.GEMINI_API_KEY || "";
+const genAI = new GoogleGenAI({ apiKey: API_KEY });
+
+const isApiKeyMissing = !API_KEY;
 
 const DOSHA_QUESTIONS = [
   {
@@ -389,7 +392,12 @@ const HealthTipBar = () => {
   const [loading, setLoading] = useState(false);
 
   const fetchTip = async () => {
-    if (loading) return;
+    if (loading || isApiKeyMissing) {
+      if (isApiKeyMissing && !tip) {
+        setTip({ hindi: "स्वस्थं कुरु।", english: "Stay healthy and mindful." });
+      }
+      return;
+    }
     setLoading(true);
     try {
       const response = await genAI.models.generateContent({
@@ -477,6 +485,9 @@ export default function App() {
 
   // Auth Listener
   useEffect(() => {
+    if (isApiKeyMissing) {
+      console.warn("Gemini API Key is missing. Some features may not work.");
+    }
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setIsAuthReady(true);
@@ -802,6 +813,17 @@ function SymptomFinder({ profile, favorites }: { profile: UserProfile | null, fa
 
   const findRemedies = async () => {
     if (symptoms.length === 0) return;
+    if (isApiKeyMissing) {
+      console.error("Gemini API Key is missing. Please set GEMINI_API_KEY in your environment.");
+      setResults([{
+        name: "Warm Water & Rest",
+        benefits: "Hydration and recovery",
+        howToUse: "Sip warm water throughout the day.",
+        precautions: "None"
+      }]);
+      setSeverity('Mild');
+      return;
+    }
     setLoading(true);
     setResults([]);
     setSeverity(null);
@@ -848,7 +870,7 @@ function SymptomFinder({ profile, favorites }: { profile: UserProfile | null, fa
 
   const startVoiceInput = () => {
     if (!('webkitSpeechRecognition' in window)) {
-      alert("Speech recognition not supported in this browser.");
+      console.error("Speech recognition not supported in this browser.");
       return;
     }
     const recognition = new (window as any).webkitSpeechRecognition();
@@ -1060,6 +1082,10 @@ function HerbScanner() {
   };
 
   const analyzeImage = async (base64: string) => {
+    if (isApiKeyMissing) {
+      console.error("Gemini API Key is missing.");
+      return;
+    }
     setScanning(true);
     setResult(null);
     try {
@@ -1673,6 +1699,10 @@ function Chatbot({ profile }: { profile: UserProfile | null }) {
 
   const sendMessage = async () => {
     if (!input || loading) return;
+    if (isApiKeyMissing) {
+      setMessages(prev => [...prev, { role: 'model', text: "I apologize, but my AI wisdom is currently disconnected (API Key missing). Please check the configuration." }]);
+      return;
+    }
     const userMsg = input;
     setInput('');
     setMessages(prev => [...prev, { role: 'user', text: userMsg }]);
@@ -1774,6 +1804,10 @@ function DIYRemedyMaker() {
 
   const generateRemedy = async () => {
     if (selectedIngredients.length === 0) return;
+    if (isApiKeyMissing) {
+      console.error("Gemini API Key is missing.");
+      return;
+    }
     setLoading(true);
     try {
       const response = await genAI.models.generateContent({
